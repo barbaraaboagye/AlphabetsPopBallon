@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Alphabet Balloon Pop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            touch-action: manipulation;
+            overflow: hidden;
+            background: linear-gradient(to bottom, #87CEEB, #E0F7FA);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .balloon {
+            position: absolute;
+            bottom: -100px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            filter: drop-shadow(0 5px 15px rgba(0,0,0,0.2));
+        }
+
+        .balloon:active {
+            transform: scale(0.8);
+        }
+
+        .balloon-svg {
+            width: 80px;
+            height: 100px;
+        }
+
+        .letter {
+            position: absolute;
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+
+        .pop-effect {
+            position: absolute;
+            pointer-events: none;
+            animation: explode 0.4s ease-out forwards;
+        }
+
+        @keyframes explode {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+
+        .cloud {
+            position: absolute;
+            background: white;
+            border-radius: 50px;
+            opacity: 0.8;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative">
+
+    <!-- UI Layer -->
+    <div id="ui-container" class="relative z-10 p-4 pointer-events-none w-full flex flex-col items-center">
+        <div id="status-card" class="bg-white/80 backdrop-blur-md rounded-2xl p-4 shadow-lg flex flex-col items-center pointer-events-auto min-w-[220px]">
+            <div id="target-display" class="text-xl font-bold text-gray-700 mb-1">Pop the balloons!</div>
+            <div id="score-display" class="text-3xl font-black text-blue-600">Score: 0</div>
+        </div>
+
+        <div class="mt-4 flex gap-2 pointer-events-auto">
+            <button onclick="setMode('free')" id="btn-free" class="px-4 py-2 bg-blue-500 text-white rounded-full font-bold shadow-md hover:bg-blue-600 transition border-4 border-white">Free Play</button>
+            <button onclick="setMode('challenge')" id="btn-challenge" class="px-4 py-2 bg-purple-500 text-white rounded-full font-bold shadow-md hover:bg-purple-600 transition border-4 border-transparent">Find Letters</button>
+        </div>
+    </div>
+
+    <div id="game-area" class="absolute inset-0 z-0 overflow-hidden"></div>
+
+    <div id="overlay" class="fixed inset-0 bg-blue-500/90 z-50 flex items-center justify-center p-6 text-center">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full">
+            <h1 class="text-4xl font-black text-blue-600 mb-4">Alphabet Balloon Pop</h1>
+            <p class="text-gray-600 mb-8 text-lg">Learn English ABCs! Hear the letters as you pop them.</p>
+            <button onclick="startGame()" class="w-full py-4 bg-green-500 hover:bg-green-600 text-white text-2xl font-bold rounded-2xl shadow-lg transition-transform active:scale-95">
+                START GAME
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const gameArea = document.getElementById('game-area');
+        const scoreDisplay = document.getElementById('score-display');
+        const targetDisplay = document.getElementById('target-display');
+        const statusCard = document.getElementById('status-card');
+        const overlay = document.getElementById('overlay');
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+        const colors = ["#FF5252", "#FF4081", "#E040FB", "#7C4DFF", "#536DFE", "#448AFF", "#40C4FF", "#18FFFF", "#64FFDA", "#69F0AE", "#B2FF59", "#EEFF41", "#FFFF00", "#FFD740", "#FFAB40", "#FF6E40"];
+        
+        let score = 0;
+        let mode = 'free'; 
+        let currentTargetLetter = '';
+        let balloons = [];
+        let gameActive = false;
+        let spawnInterval;
+        let englishVoice = null;
+
+        // Initialize Voices
+        function loadVoices() {
+            const voices = window.speechSynthesis.getVoices();
+            // Try to find a high-quality English voice (US, UK, or any English)
+            englishVoice = voices.find(v => v.lang === 'en-US') || 
+                           voices.find(v => v.lang === 'en-GB') || 
+                           voices.find(v => v.lang.startsWith('en'));
+        }
+
+        // Browsers load voices asynchronously
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+            loadVoices();
+        }
+
+        function startGame() {
+            overlay.classList.add('hidden');
+            gameActive = true;
+            score = 0;
+            updateScore();
+            createClouds();
+            spawnInterval = setInterval(createBalloon, 1200);
+            requestAnimationFrame(update);
+            speak("Let's play! Pop the balloons.");
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            document.getElementById('btn-free').style.borderColor = mode === 'free' ? 'white' : 'transparent';
+            document.getElementById('btn-challenge').style.borderColor = mode === 'challenge' ? 'white' : 'transparent';
+            
+            if (mode === 'challenge') {
+                pickNewTarget();
+            } else {
+                targetDisplay.innerText = "Pop the balloons!";
+                targetDisplay.classList.remove('text-purple-600');
+            }
+        }
+
+        function pickNewTarget() {
+            currentTargetLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+            targetDisplay.innerText = `Find the letter: ${currentTargetLetter}`;
+            targetDisplay.classList.add('text-purple-600');
+            speak(`Find the letter ${currentTargetLetter.toLowerCase()}`);
+        }
+
+        function createClouds() {
+            for (let i = 0; i < 5; i++) {
+                const cloud = document.createElement('div');
+                cloud.className = 'cloud';
+                const width = 100 + Math.random() * 100;
+                cloud.style.width = width + 'px';
+                cloud.style.height = (width / 2) + 'px';
+                cloud.style.top = (Math.random() * 50) + '%';
+                cloud.style.left = (Math.random() * 100) + '%';
+                gameArea.appendChild(cloud);
+            }
+        }
+
+        function createBalloon() {
+            if (!gameActive) return;
+
+            let letter;
+            if (mode === 'challenge' && Math.random() < 0.25) {
+                letter = currentTargetLetter;
+            } else {
+                letter = alphabet[Math.floor(Math.random() * alphabet.length)];
+            }
+
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const x = Math.random() * (window.innerWidth - 100) + 20;
+            const speed = 1 + Math.random() * 2;
+
+            const balloon = document.createElement('div');
+            balloon.className = 'balloon';
+            balloon.style.left = x + 'px';
+            
+            balloon.innerHTML = `
+                <svg class="balloon-svg" viewBox="0 0 100 120">
+                    <defs>
+                        <radialGradient id="grad-${Math.random()}" cx="30%" cy="30%" r="50%">
+                            <stop offset="0%" style="stop-color:white; stop-opacity:0.3" />
+                            <stop offset="100%" style="stop-color:${color}; stop-opacity:0" />
+                        </radialGradient>
+                    </defs>
+                    <ellipse cx="50" cy="50" rx="45" ry="50" fill="${color}" />
+                    <ellipse cx="50" cy="50" rx="45" ry="50" fill="url(#grad-${Math.random()})" />
+                    <path d="M50 100 L45 115 L55 115 Z" fill="${color}" />
+                    <path d="M50 115 Q45 130 50 145" stroke="#666" fill="none" />
+                </svg>
+                <div class="letter">${letter}</div>
+            `;
+
+            balloon.dataset.letter = letter;
+            balloon.dataset.speed = speed;
+            balloon.dataset.y = -100;
+
+            balloon.addEventListener('mousedown', () => popBalloon(balloon));
+            balloon.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                popBalloon(balloon);
+            });
+
+            gameArea.appendChild(balloon);
+            balloons.push(balloon);
+        }
+
+        function popBalloon(balloon) {
+            const letter = balloon.dataset.letter;
+            
+            const rect = balloon.getBoundingClientRect();
+            const effect = document.createElement('div');
+            effect.className = 'pop-effect';
+            effect.style.left = rect.left + 'px';
+            effect.style.top = rect.top + 'px';
+            effect.innerHTML = `
+                <svg width="100" height="100" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="10" fill="white" />
+                    <g stroke="white" stroke-width="4">
+                        <line x1="50" y1="20" x2="50" y2="5" />
+                        <line x1="50" y1="80" x2="50" y2="95" />
+                        <line x1="20" y1="50" x2="5" y2="50" />
+                        <line x1="80" y1="50" x2="95" y2="50" />
+                    </g>
+                </svg>
+            `;
+            gameArea.appendChild(effect);
+            setTimeout(() => effect.remove(), 400);
+
+            if (mode === 'challenge') {
+                if (letter === currentTargetLetter) {
+                    speak(letter.toLowerCase());
+                    score += 10;
+                    pickNewTarget();
+                } else {
+                    statusCard.classList.add('shake');
+                    setTimeout(() => statusCard.classList.remove('shake'), 500);
+                    speak(`That is ${letter.toLowerCase()}. Find ${currentTargetLetter.toLowerCase()}.`);
+                    score = Math.max(0, score - 5);
+                }
+            } else {
+                speak(letter.toLowerCase());
+                score++;
+            }
+            
+            updateScore();
+            balloon.remove();
+            balloons = balloons.filter(b => b !== balloon);
+        }
+
+        function updateScore() {
+            scoreDisplay.innerText = `Score: ${score}`;
+        }
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                
+                // Force English Voice
+                if (englishVoice) {
+                    utterance.voice = englishVoice;
+                    utterance.lang = englishVoice.lang;
+                } else {
+                    // Fallback to English language setting if no specific voice object found
+                    utterance.lang = 'en-US';
+                }
+
+                utterance.rate = 0.85;
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            for (let i = balloons.length - 1; i >= 0; i--) {
+                const b = balloons[i];
+                let y = parseFloat(b.dataset.y);
+                const speed = parseFloat(b.dataset.speed);
+                
+                y += speed;
+                b.dataset.y = y;
+                b.style.transform = `translateY(-${y}px) rotate(${Math.sin(y/40) * 5}deg)`;
+
+                if (y > window.innerHeight + 200) {
+                    b.remove();
+                    balloons.splice(i, 1);
+                }
+            }
+            requestAnimationFrame(update);
+        }
+    </script>
+</body>
+</html>
